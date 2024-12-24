@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/sqlc-dev/sqlc/internal/admin"
 	"io"
 	"os"
 	"os/exec"
@@ -48,6 +49,7 @@ func Do(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int 
 	rootCmd.AddCommand(verifyCmd)
 	rootCmd.AddCommand(pushCmd)
 	rootCmd.AddCommand(NewCmdVet())
+	rootCmd.AddCommand(adminCmd)
 
 	rootCmd.SetArgs(args)
 	rootCmd.SetIn(stdin)
@@ -72,6 +74,16 @@ func Do(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int 
 		}
 	}
 	return 0
+}
+
+var adminCmd = &cobra.Command{
+	Use:   "admin",
+	Short: "Show admin panel",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		defer trace.StartRegion(cmd.Context(), "admin").End()
+		admin.RunAdminServer()
+		return nil
+	},
 }
 
 var version string

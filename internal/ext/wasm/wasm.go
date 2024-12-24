@@ -87,12 +87,12 @@ func (r *Runner) fetch(ctx context.Context, uri string) ([]byte, string, error) 
 	case strings.HasPrefix(uri, "https://"):
 		req, err := http.NewRequestWithContext(ctx, "GET", uri, nil)
 		if err != nil {
-			return nil, "", fmt.Errorf("http.Get: %s %w", uri, err)
+			return nil, "", fmt.Errorf("response.Get: %s %w", uri, err)
 		}
 		req.Header.Set("User-Agent", fmt.Sprintf("sqlc/%s Go/%s (%s %s)", info.Version, runtime.Version(), runtime.GOOS, runtime.GOARCH))
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
-			return nil, "", fmt.Errorf("http.Get: %s %w", r.URL, err)
+			return nil, "", fmt.Errorf("response.Get: %s %w", r.URL, err)
 		}
 		body = resp.Body
 

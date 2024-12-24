@@ -1,4 +1,4 @@
-.PHONY: build build-endtoend test test-ci test-examples test-endtoend start psql mysqlsh proto
+.PHONY: build build-endtoend test test-ci test-examples test-endtoend start psql mysqlsh proto build-dev
 
 build:
 	go build ./...
@@ -35,6 +35,9 @@ sqlc-gen-json:
 start:
 	docker compose up -d
 
+admin: build-dev
+	sqlc-dev admin
+
 fmt:
 	go fmt ./...
 
@@ -52,3 +55,6 @@ remote-proto:
 		--go_out=. --go_opt="Minternal/remote/gen.proto=github.com/sqlc-dev/sqlc/internal/remote" --go_opt=module=github.com/sqlc-dev/sqlc \
         --go-grpc_out=. --go-grpc_opt="Minternal/remote/gen.proto=github.com/sqlc-dev/sqlc/internal/remote" --go-grpc_opt=module=github.com/sqlc-dev/sqlc \
         internal/remote/gen.proto
+
+build-dev:
+	go build -o ~/go/bin/sqlc-dev ./cmd/sqlc
