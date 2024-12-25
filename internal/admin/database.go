@@ -1,11 +1,12 @@
 package admin
 
 import (
-	"errors"
+	"database/sql"
 	"fmt"
+	"github.com/Masterminds/squirrel"
+	_ "github.com/lib/pq"
 	"github.com/sqlc-dev/sqlc/internal/admin/model"
-	"gorm.io/driver/postgres"
-	"gorm.io/gorm"
+	"github.com/sqlc-dev/sqlc/internal/admin/utils"
 	"log"
 	"os"
 )
@@ -25,7 +26,7 @@ type DatabaseRepository interface {
 }
 
 type DatabaseService struct {
-	DB *gorm.DB
+	DB *sql.DB
 }
 
 func NewDatabaseService() DatabaseRepository {
@@ -41,167 +42,274 @@ func NewDatabaseService() DatabaseRepository {
 		host, user, password, dbName, port,
 	)
 
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	db, err := sql.Open("postgres", dsn)
 
 	if err != nil {
 		log.Fatal(err)
 	}
 	log.Println("Database connection established")
 
-	migrate(db)
+	//migrate(db)
 	return &DatabaseService{db}
 }
 
-func migrate(db *gorm.DB) {
-	err := db.AutoMigrate(&model.AdminSchema{})
-	if err != nil {
-		log.Fatal(err)
-	}
-	log.Println("Database migrated!")
-}
+//func migrate(db *gorm.DB) {
+//	err := db.AutoMigrate(&model.AdminSchema{})
+//	if err != nil {
+//		log.Fatal(err)
+//	}
+//	log.Println("Database migrated!")
+//}
 
 func (ds *DatabaseService) GetTableSize(tableName string) (tableSize int64, err error) {
 	var count int64
-	err = ds.DB.Table(tableName).Count(&count).Error
+	sb := squirrel.StatementBuilder.PlaceholderFormat(squirrel.Dollar).
+		Select("COUNT(*)").From(tableName)
+
+	query, args, err := sb.ToSql()
+	if err != nil {
+		return 0, err
+	}
+
+	err = ds.DB.QueryRow(query, args...).Scan(&count)
 	return count, err
 }
 
 func (ds *DatabaseService) GetTablesNames() (tablesName []string, err error) {
-	query := `SELECT tablename FROM pg_tables WHERE schemaname = 'public'`
-	var tablesNames []string
-	result := ds.DB.Raw(query).Scan(&tablesNames)
-	if result.Error != nil {
-		log.Fatalf("Error fetching table names: %v", result.Error)
-		return nil, result.Error
+	sb := squirrel.StatementBuilder.PlaceholderFormat(squirrel.Dollar).
+		Select("table_name").
+		From("information_schema.tables").
+		Where(squirrel.Eq{"table_schema": "public"})
+
+	query, args, err := sb.ToSql()
+	if err != nil {
+		return nil, err
 	}
-	return tablesNames, nil
+
+	result, err := ds.DB.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer result.Close()
+
+	for result.Next() {
+		var table string
+		if err := result.Scan(&table); err != nil {
+			return nil, err
+		}
+		tablesName = append(tablesName, table)
+	}
+
+	fmt.Println("this is result", tablesName)
+	return tablesName, nil
 }
 
 func (ds *DatabaseService) GetTableColumns(tableName string) (columns []model.ColumnInfo, err error) {
-	query := `
-		SELECT column_name, column_default, is_nullable, data_type
-		FROM information_schema.columns 
-		WHERE table_name = ?;
-	`
-	result := ds.DB.Raw(query, tableName).Scan(&columns)
-	return columns, result.Error
+	sb := squirrel.StatementBuilder.PlaceholderFormat(squirrel.Dollar).
+		Select("column_name", "column_default", "is_nullable", "data_type").
+		From("information_schema.columns").
+		Where(squirrel.Eq{"table_name": tableName})
+
+	query, args, err := sb.ToSql()
+	if err != nil {
+		return nil, err
+	}
+
+	result, err := ds.DB.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer result.Close()
+
+	for result.Next() {
+		var column model.ColumnInfo
+		if err := result.Scan(&column.ColumnName, &column.ColumnDefault, &column.IsNullable, &column.DataType); err != nil {
+			return nil, err
+		}
+		columns = append(columns, column)
+	}
+
+	return columns, nil
 }
 
 func (ds *DatabaseService) DropTable(tableName string) (err error) {
-	return ds.DB.Migrator().DropTable(tableName)
+	query := fmt.Sprintf("DROP TABLE IF EXISTS %s", tableName)
+	_, err = ds.DB.Exec(query)
+
+	return err
 }
 
 func (ds *DatabaseService) GetPrimaryColumn(tableName string) (columnName string, err error) {
-	query := `
-		SELECT a.attname AS column_name
-		FROM pg_index i
-		JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
-		WHERE i.indrelid = ?::regclass
-		AND i.indisprimary;
-	`
-	var primaryColumnName string
-	result := ds.DB.Raw(query, tableName).Scan(&primaryColumnName)
-	return primaryColumnName, result.Error
+	//query := `
+	//	SELECT a.attname AS column_name
+	//	FROM pg_index i
+	//	JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+	//	WHERE i.indrelid = ?::regclass
+	//	AND i.indisprimary;
+	//`
+	//var primaryColumnName string
+	//result := ds.DB.Raw(query, tableName).Scan(&primaryColumnName)
+	return "", nil
 }
 
 func (ds *DatabaseService) CreateDocument(info model.DocumentInfo) (err error) {
 	fmt.Println(info)
 
-	columns := ""
-	values := ""
+	var columns []string
+	var values []interface{}
 
-	index := 0
 	for columnName, columnValue := range info.FieldsInfo {
-		if columnValue == "" {
-			continue
-		}
-
-		if index > 0 {
-			columns += ", "
-			values += ", "
-		}
-		index++
-
-		columns += columnName
-		values += fmt.Sprintf("'%s'", columnValue)
-	}
-	query := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", info.TableName, columns, values)
-
-	if err = ds.DB.Exec(query).Error; err != nil {
-		log.Printf("Failed to insert row: %v", err)
+		columns = append(columns, columnName)
+		values = append(values, columnValue)
 	}
 
+	sb := squirrel.StatementBuilder.PlaceholderFormat(squirrel.Dollar).
+		Insert(info.TableName).
+		Columns(columns...).
+		Values(values...)
+
+	query, args, err := sb.ToSql()
+	if err != nil {
+		return err
+	}
+
+	_, err = ds.DB.Exec(query, args...)
 	return err
 }
 
 func (ds *DatabaseService) GetTableDocuments(tableName string, pageNumber int, documentPerPage int) (documents []map[string]interface{}, err error) {
-	err = ds.DB.Table(tableName).Limit(documentPerPage).Offset(pageNumber * documentPerPage).Find(&documents).Error
+	sb := squirrel.StatementBuilder.PlaceholderFormat(squirrel.Dollar).
+		Select("*").
+		From(tableName).
+		Limit(uint64(documentPerPage)).
+		Offset(uint64(pageNumber * documentPerPage))
+
+	query, args, err := sb.ToSql()
 	if err != nil {
-		log.Fatalf("Failed to query table: %v", err)
+		return nil, err
 	}
-	return documents, err
+
+	rows, err := ds.DB.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	columns, err := rows.Columns()
+
+	for rows.Next() {
+		var documentData = make([]interface{}, len(columns))
+		var documentDataPtr = make([]interface{}, len(columns))
+		for documentIndex := range len(columns) {
+			documentDataPtr[documentIndex] = &documentData[documentIndex]
+		}
+
+		err = rows.Scan(documentDataPtr...)
+		if err != nil {
+			return nil, err
+		}
+		document := make(map[string]interface{})
+		for index, data := range documentData {
+			document[columns[index]] = data
+		}
+		documents = append(documents, document)
+	}
+
+	return documents, nil
 }
 
 func (ds *DatabaseService) EditDocument(tableName string, prevDocument map[string]string, updatedDocument map[string]string) (err error) {
-	setQuery := ""
-	index := 0
-	for columnName, columnValue := range updatedDocument {
-		if index > 0 {
-			setQuery += ", "
-		}
-		index++
-		setQuery += fmt.Sprintf("%s = '%s'", columnName, columnValue)
+	conditions := squirrel.And{}
+	for key, value := range prevDocument {
+		conditions = append(conditions, squirrel.Eq{key: value})
 	}
 
-	index = 0
-	conditionQuery := ""
-	for columnName, columnValue := range prevDocument {
-		if index > 0 {
-			conditionQuery += " AND "
-		}
-		index++
-		conditionQuery += fmt.Sprintf("%s = '%s'", columnName, columnValue)
+	sb := squirrel.StatementBuilder.PlaceholderFormat(squirrel.Dollar).
+		Update(tableName).
+		SetMap(utils.ConvertMapStringToMapInterface(updatedDocument)).
+		Where(conditions)
+
+	query, args, err := sb.ToSql()
+
+	result, err := ds.DB.Exec(query, args...)
+	if err != nil {
+		return err
 	}
 
-	query := fmt.Sprintf("UPDATE %s SET %s WHERE %s;", tableName, setQuery, conditionQuery)
-
-	if err = ds.DB.Exec(query).Error; err != nil {
-		log.Fatalf("Failed to query table: %v", err)
+	_, err = result.RowsAffected()
+	if err != nil {
+		return err
 	}
 
-	return err
+	return nil
 }
 
 func (ds *DatabaseService) DeleteDocument(tableName string, documentData map[string]string) (err error) {
-	index := 0
-	conditionQuery := ""
-	for columnName, columnValue := range documentData {
-		if index > 0 {
-			conditionQuery += " AND "
-		}
-		index++
-		conditionQuery += fmt.Sprintf("%s = '%s'", columnName, columnValue)
+	conditions := squirrel.And{}
+	for key, value := range documentData {
+		conditions = append(conditions, squirrel.Eq{key: value})
 	}
 
-	query := fmt.Sprintf("DELETE FROM %s WHERE %s;", tableName, conditionQuery)
+	sb := squirrel.StatementBuilder.PlaceholderFormat(squirrel.Dollar).
+		Delete(tableName).
+		Where(conditions)
 
-	result := ds.DB.Exec(query)
-	err = result.Error
-	if result.RowsAffected == 0 {
-		return errors.New("There isn't such document please refresh your table dashboard!")
+	query, args, err := sb.ToSql()
+
+	result, err := ds.DB.Exec(query, args...)
+	if err != nil {
+		return err
 	}
-	return err
+
+	_, err = result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (ds *DatabaseService) FindAdminWithUsername(username string) (admin model.AdminSchema, err error) {
-	if err := ds.DB.First(&admin, "username = ?", username).Error; err != nil {
-		log.Printf("Failed to query admin table: %v\n", err)
-		return model.AdminSchema{}, err
+	sb := squirrel.StatementBuilder.PlaceholderFormat(squirrel.Dollar).
+		Select("*").From("admin_schemas").Where(squirrel.Eq{"username": username})
+
+	query, args, err := sb.ToSql()
+	if err != nil {
+		return admin, err
 	}
-	return admin, err
+
+	err = ds.DB.QueryRow(query, args...).Scan(&admin.Username, &admin.Password, &admin.TelegramID, &admin.Email)
+	if err != nil {
+		return admin, err
+	}
+	return admin, nil
 }
 
 func (ds *DatabaseService) InsertAdmin(admin model.AdminSchema) (model.AdminSchema, error) {
-	err := ds.DB.Create(&admin).Error
-	return admin, err
+	adminMapped := map[string]interface{}{
+		"username":    admin.Username,
+		"password":    admin.Password,
+		"telegram_id": admin.TelegramID,
+		"email":       admin.Email,
+	}
+
+	sb := squirrel.StatementBuilder.PlaceholderFormat(squirrel.Dollar).
+		Insert("admin_schemas").
+		SetMap(adminMapped)
+
+	query, args, err := sb.ToSql()
+	if err != nil {
+		return admin, err
+	}
+
+	result, err := ds.DB.Exec(query, args...)
+	if err != nil {
+		return admin, err
+	}
+
+	_, err = result.RowsAffected()
+	if err != nil {
+		return admin, err
+	}
+
+	return admin, nil
 }

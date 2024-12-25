@@ -1,10 +1,10 @@
 package model
 
 type ColumnInfo struct {
-	ColumnName    string `json:"column_name"`
-	DataType      string `json:"data_type"`
-	IsNullable    string `json:"is_nullable"`
-	ColumnDefault string `json:"column_default"`
+	ColumnName    string      `json:"column_name"`
+	DataType      string      `json:"data_type"`
+	IsNullable    string      `json:"is_nullable"`
+	ColumnDefault interface{} `json:"column_default"`
 }
 
 type TableInfoResponse struct {

@@ -156,6 +156,7 @@ func handleEditDocument(w http.ResponseWriter, r *http.Request) {
 	var editDocumentRequest model.EditDocumentRequest
 	err = json.Unmarshal(body, &editDocumentRequest)
 	if err != nil {
+
 		http.Error(w, "Unable to parse body", http.StatusBadRequest)
 		return
 	}
@@ -212,7 +213,7 @@ func JWTMiddleware(next http.Handler) http.Handler {
 }
 
 func RunDashboard(r chi.Router) {
-	r.Use(JWTMiddleware)
+	//r.Use(JWTMiddleware)
 
 	r.Get("/tableNames", handleTableNames)
 	r.Delete("/dropTable", handleDropTable)
