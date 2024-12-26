@@ -8,6 +8,9 @@ sqlc generates **type-safe code** from SQL. Here's how it works:
 1. You write queries in SQL.
 1. You run sqlc to generate code with type-safe interfaces to those queries and showing admin panel of your database.
 1. You write application code that calls the generated code.
+
+You can find the client-side repository here: [SQLC Admin Panel](https://github.com/MAQilH/sqlc-admin-panel)
+
    
 
 Check out [an interactive example](https://play.sqlc.dev/) to see it in action, and the [introductory blog post](https://conroy.org/introducing-sqlc) for the motivation behind sqlc.
